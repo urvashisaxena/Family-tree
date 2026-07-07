@@ -17,6 +17,10 @@
     <button id="btnExample" title="Load a sample family">Example</button>
     <button id="btnClear" title="Remove everyone">Clear</button>
     <span class="sep"></span>
+    <button id="btnOpen" title="Open a saved .xml family tree">📂 Open</button>
+    <button id="btnXml" title="Save as .xml — upload it later to keep editing">💾 XML</button>
+    <input type="file" id="fileOpen" accept=".xml,text/xml,application/xml" hidden>
+    <span class="sep"></span>
     <button id="btnZoomOut" title="Zoom out">−</button>
     <button id="btnZoomIn" title="Zoom in">＋</button>
     <button id="btnFit" title="Fit tree to screen">Fit</button>
@@ -41,6 +45,7 @@
       <p>Add one person, then build outward with the ＋ buttons —<br>parents above, spouse beside, siblings alongside, children below.</p>
       <button id="btnFirst" class="primary big">＋ Add the first person</button>
       <button id="btnExample2" class="ghost">…or start from an example</button>
+      <button id="btnOpen2" class="ghost">…or open a saved .xml tree</button>
     </div>
   </div>
 
@@ -55,7 +60,7 @@
   <div id="hint">Click a person to light up their relationships · double-click to edit</div>
 </main>
 
-<footer>Nothing leaves this tab — no accounts, no servers. Download a PNG or PDF before you close the page.</footer>
+<footer>Nothing leaves this tab — no accounts, no servers. Save as XML to keep editing later; download PNG or PDF when it looks right.</footer>
 
 <div id="modalBack" class="overlay hidden">
   <div class="modal" role="dialog" aria-modal="true">
