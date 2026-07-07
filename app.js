@@ -896,6 +896,125 @@ async function exportPdf() {
   download(blob, safeName() + '.pdf');
 }
 
+/* ============================== XML save / open ============================== */
+
+const escXml = s => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+function toXml() {
+  const lines = ['<?xml version="1.0" encoding="UTF-8"?>'];
+  lines.push(`<familyTree app="family-tree-builder" version="1" title="${escXml(state.title)}">`);
+  for (const p of persons()) {
+    let attrs = ` id="${escXml(p.id)}" name="${escXml(p.name)}" gender="${escXml(p.gender)}"`;
+    if (p.birth) attrs += ` birth="${escXml(p.birth)}"`;
+    if (p.death) attrs += ` death="${escXml(p.death)}"`;
+    if (p.note) attrs += ` note="${escXml(p.note)}"`;
+    lines.push(`  <person${attrs}/>`);
+  }
+  for (const u of unions()) {
+    lines.push(`  <union id="${escXml(u.id)}">`);
+    u.partners.forEach(pid => lines.push(`    <partner ref="${escXml(pid)}"/>`));
+    u.children.forEach(pid => lines.push(`    <child ref="${escXml(pid)}"/>`));
+    lines.push('  </union>');
+  }
+  lines.push('</familyTree>');
+  return lines.join('\n') + '\n';
+}
+
+function parseXml(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Not valid XML.');
+  const root = doc.documentElement;
+  if (root.nodeName !== 'familyTree') {
+    throw new Error(`Expected a <familyTree> root element, found <${root.nodeName}>.`);
+  }
+  const next = { title: root.getAttribute('title') || 'My Family Tree', seq: 0, persons: {}, unions: {} };
+  let maxSeq = 0;
+  const bumpSeq = id => {
+    const m = /(\d+)$/.exec(id);
+    if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
+  };
+  for (const e of root.querySelectorAll(':scope > person')) {
+    const id = e.getAttribute('id');
+    if (!id || next.persons[id]) throw new Error('Every <person> needs a unique id attribute.');
+    const g = e.getAttribute('gender');
+    next.persons[id] = {
+      id,
+      name: (e.getAttribute('name') || '').trim() || 'Unnamed',
+      gender: ['f', 'm', 'x'].includes(g) ? g : 'x',
+      birth: e.getAttribute('birth') || '',
+      death: e.getAttribute('death') || '',
+      note: e.getAttribute('note') || '',
+      parentUnion: null,
+    };
+    bumpSeq(id);
+  }
+  for (const e of root.querySelectorAll(':scope > union')) {
+    const id = e.getAttribute('id');
+    if (!id || next.unions[id]) throw new Error('Every <union> needs a unique id attribute.');
+    const refs = sel => [...e.querySelectorAll(`:scope > ${sel}`)]
+      .map(c => c.getAttribute('ref'))
+      .filter(r => {
+        if (!next.persons[r]) throw new Error(`<union id="${id}"> refers to unknown person "${r}".`);
+        return true;
+      });
+    const partners = [...new Set(refs('partner'))];
+    if (partners.length > 2) throw new Error(`<union id="${id}"> has more than two partners.`);
+    // a person can only descend from one union; first one listed wins
+    const children = [...new Set(refs('child'))]
+      .filter(c => next.persons[c].parentUnion === null && !partners.includes(c));
+    if (partners.length + children.length < 2) continue; // nothing to connect
+    next.unions[id] = { id, partners, children };
+    children.forEach(c => { next.persons[c].parentUnion = id; });
+    bumpSeq(id);
+  }
+  next.seq = maxSeq;
+  return next;
+}
+
+function openXmlText(text, sourceName) {
+  let next;
+  try {
+    next = parseXml(text);
+  } catch (err) {
+    alert(`Couldn't open ${sourceName || 'that file'}: ${err.message}`);
+    return;
+  }
+  if (persons().length) pushUndo();
+  state = next;
+  selected = null;
+  $('treeTitle').value = state.title;
+  document.title = (state.title || 'Family Tree') + ' — Family Tree Builder';
+  render();
+  autoFit(true);
+}
+
+function exportXml() {
+  if (!persons().length) return;
+  download(new Blob([toXml()], { type: 'application/xml' }), safeName() + '.xml');
+}
+
+function openXmlFile(file) {
+  if (!file) return;
+  file.text().then(text => openXmlText(text, file.name));
+}
+
+$('btnXml').addEventListener('click', exportXml);
+$('btnOpen').addEventListener('click', () => $('fileOpen').click());
+$('btnOpen2').addEventListener('click', () => $('fileOpen').click());
+$('fileOpen').addEventListener('change', e => {
+  openXmlFile(e.target.files[0]);
+  e.target.value = '';
+});
+// drag & drop a saved .xml anywhere onto the canvas
+const stage = $('stage');
+stage.addEventListener('dragover', e => e.preventDefault());
+stage.addEventListener('drop', e => {
+  e.preventDefault();
+  openXmlFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+});
+
 /* ============================== example ============================== */
 
 function loadExample() {
