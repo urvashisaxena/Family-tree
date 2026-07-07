@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Tree Builder</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🌳</span>
+    <input id="treeTitle" value="My Family Tree" spellcheck="false" aria-label="Tree title">
+  </div>
+  <div class="actions">
+    <button id="btnUndo" title="Undo last change (Ctrl+Z)">↩ Undo</button>
+    <button id="btnExample" title="Load a sample family">Example</button>
+    <button id="btnClear" title="Remove everyone">Clear</button>
+    <span class="sep"></span>
+    <button id="btnZoomOut" title="Zoom out">−</button>
+    <button id="btnZoomIn" title="Zoom in">＋</button>
+    <button id="btnFit" title="Fit tree to screen">Fit</button>
+    <span class="sep"></span>
+    <button id="btnPng" class="primary" title="Download as PNG image">⬇ PNG</button>
+    <button id="btnPdf" class="primary" title="Download as PDF">⬇ PDF</button>
+  </div>
+</header>
+
+<main id="stage">
+  <svg id="canvas" role="application" aria-label="Family tree canvas">
+    <g id="viewport">
+      <g id="scene"></g>
+      <g id="overlay"></g>
+    </g>
+  </svg>
+
+  <div id="emptyState">
+    <div class="emptyCard">
+      <div class="emptyArt">🌳</div>
+      <h2>Grow your family tree</h2>
+      <p>Add one person, then build outward with the ＋ buttons —<br>parents above, spouse beside, siblings alongside, children below.</p>
+      <button id="btnFirst" class="primary big">＋ Add the first person</button>
+      <button id="btnExample2" class="ghost">…or start from an example</button>
+    </div>
+  </div>
+
+  <div id="legend" class="hidden" aria-hidden="true">
+    <span class="chip" style="--c:#6366f1">Selected</span>
+    <span class="chip" style="--c:#0284c7">Parents</span>
+    <span class="chip" style="--c:#e11d48">Spouse</span>
+    <span class="chip" style="--c:#d97706">Siblings</span>
+    <span class="chip" style="--c:#059669">Children</span>
+  </div>
+
+  <div id="hint">Click a person to light up their relationships · double-click to edit</div>
+</main>
+
+<footer>Nothing leaves this tab — no accounts, no servers. Download a PNG or PDF before you close the page.</footer>
+
+<div id="modalBack" class="overlay hidden">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modalTitle">Add person</h3>
+    <label>Name
+      <input id="fName" placeholder="Full name" autocomplete="off">
+    </label>
+    <div class="row">
+      <label>Born
+        <input id="fBirth" placeholder="e.g. 1962" autocomplete="off">
+      </label>
+      <label>Died
+        <input id="fDeath" placeholder="leave empty if living" autocomplete="off">
+      </label>
+    </div>
+    <div class="glabel">Gender</div>
+    <div class="genders" id="fGender">
+      <button type="button" data-g="f">♀ Female</button>
+      <button type="button" data-g="m">♂ Male</button>
+      <button type="button" data-g="x">Other</button>
+    </div>
+    <label>Note
+      <input id="fNote" placeholder="optional — shows as a tooltip" autocomplete="off">
+    </label>
+    <div class="mactions">
+      <button id="mDelete" class="danger hidden">Delete</button>
+      <span class="spacer"></span>
+      <button id="mCancel">Cancel</button>
+      <button id="mSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="chooserBack" class="overlay hidden">
+  <div class="modal" id="chooserBox" role="dialog" aria-modal="true"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
