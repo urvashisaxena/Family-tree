@@ -67,6 +67,8 @@ function createPerson(fields) {
     death: (fields.death || '').trim(),
     note: (fields.note || '').trim(),
     parentUnion: null,
+    dx: 0,   // manual drag offsets on top of the automatic layout
+    dy: 0,
   };
   state.persons[p.id] = p;
   return p;
@@ -272,86 +274,113 @@ function computeLayout() {
       return chain.x + CARD_W / 2 + idx * (CARD_W + SPOUSE_GAP);
     };
 
-    // force iterations: parents centered over children, siblings cohesive
-    for (let it = 0; it < 320; it++) {
-      const force = new Map();
-      const addF = (ch, f) => {
-        const rec = force.get(ch) || { sum: 0, n: 0 };
-        rec.sum += f; rec.n += 1; force.set(ch, rec);
-      };
-      for (const u of compUnions) {
-        if (!u.children.length) continue;
-        const centers = u.children.map(centerOf);
-        const cm = centers.reduce((a, b) => a + b, 0) / centers.length;
-        // sibling cohesion (also for unknown-parent groups)
-        u.children.forEach((c, i) => addF(chainOf[c].chain, (cm - centers[i]) * 0.3));
-        if (!u.partners.length) continue;
-        const um = u.partners.map(centerOf).reduce((a, b) => a + b, 0) / u.partners.length;
-        const d = um - cm;
-        u.children.forEach(c => addF(chainOf[c].chain, d));
-        u.partners.forEach(p => addF(chainOf[p].chain, -d));
+    // Relaxation in alternating directional passes (children under parents, then
+    // parents over children — a single averaged force lets a chain that is both
+    // parent and child settle where two misalignments cancel). Each row is then
+    // solved EXACTLY with weighted isotonic regression (pool-adjacent-violators):
+    // chains keep their order and minimum gaps, aligned chains carry real weight,
+    // and force-free chains get ~zero weight so they slide out of the way instead
+    // of blocking alignment.
+    const solveRow = (row, desire, weight) => {
+      const pre = [];
+      let acc = 0;
+      for (const ch of row) { pre.push(acc); acc += ch.w + CHAIN_GAP; }
+      const blocks = [];
+      for (let i = 0; i < row.length; i++) {
+        let b = { wv: (desire[i] - pre[i]) * weight[i], w: weight[i], n: 1 };
+        while (blocks.length && blocks[blocks.length - 1].wv / blocks[blocks.length - 1].w >= b.wv / b.w) {
+          const prev = blocks.pop();
+          b = { wv: b.wv + prev.wv, w: b.w + prev.w, n: b.n + prev.n };
+        }
+        blocks.push(b);
       }
-      let maxMove = 0;
-      force.forEach((rec, ch) => {
-        const m = (rec.sum / rec.n) * 0.5;
-        ch.x += m;
-        maxMove = Math.max(maxMove, Math.abs(m));
-      });
-      // collision resolution per row, alternating sweep direction
-      for (const [, row] of rows) {
-        row.sort((a, b) => a.x - b.x);
-        if (it % 2 === 0) {
-          for (let i = 1; i < row.length; i++) {
-            const min = row[i - 1].x + row[i - 1].w + CHAIN_GAP;
-            if (row[i].x < min) row[i].x = min;
-          }
-        } else {
-          for (let i = row.length - 2; i >= 0; i--) {
-            const max = row[i + 1].x - CHAIN_GAP - row[i].w;
-            if (row[i].x > max) row[i].x = max;
-          }
+      let i = 0, maxMove = 0;
+      for (const b of blocks) {
+        const y = b.wv / b.w;
+        for (let k = 0; k < b.n; k++, i++) {
+          const nx = y + pre[i];
+          maxMove = Math.max(maxMove, Math.abs(nx - row[i].x));
+          row[i].x = nx;
         }
       }
-      if (maxMove < 0.4 && it > 60) break;
+      return maxMove;
+    };
+    for (let it = 0; it < 160; it++) {
+      let maxMove = 0;
+      for (const pass of ['down', 'up']) {
+        const force = new Map();
+        const addF = (ch, f, w) => {
+          const rec = force.get(ch) || { sum: 0, w: 0 };
+          rec.sum += f * w; rec.w += w; force.set(ch, rec);
+        };
+        for (const u of compUnions) {
+          if (!u.children.length) continue;
+          const centers = u.children.map(centerOf);
+          const cm = centers.reduce((a, b) => a + b, 0) / centers.length;
+          if (pass === 'down') {
+            if (u.partners.length) {
+              const um = u.partners.map(centerOf).reduce((a, b) => a + b, 0) / u.partners.length;
+              u.children.forEach(c => addF(chainOf[c].chain, um - cm, 1));
+            } else if (u.children.length > 1) {
+              // cohesion keeps unknown-parent sibling groups together
+              u.children.forEach((c, i) => addF(chainOf[c].chain, cm - centers[i], 0.5));
+            }
+          } else if (u.partners.length) {
+            const um = u.partners.map(centerOf).reduce((a, b) => a + b, 0) / u.partners.length;
+            u.partners.forEach(p => addF(chainOf[p].chain, cm - um, 1));
+          }
+        }
+        for (const [, row] of rows) {
+          row.sort((a, b) => a.x - b.x);
+          const desire = row.map(ch => {
+            const rec = force.get(ch);
+            return rec ? ch.x + (rec.sum / rec.w) * 0.8 : ch.x;
+          });
+          const weight = row.map(ch => (force.get(ch) ? force.get(ch).w : 0.01));
+          maxMove = Math.max(maxMove, solveRow(row, desire, weight));
+        }
+      }
+      if (maxMove < 0.2 && it > 30) break;
     }
 
-    // materialize positions, offset the whole component
+    // materialize positions (auto layout + manual drag offsets), offset the component
     let minX = Infinity, maxX = -Infinity;
     cids.forEach(id => {
       const cx = centerOf(id);
       minX = Math.min(minX, cx - CARD_W / 2);
       maxX = Math.max(maxX, cx + CARD_W / 2);
     });
-    const dx = xCursor - minX;
+    const compDx = xCursor - minX;
     cids.forEach(id => {
-      pos[id] = { cx: centerOf(id) + dx, y: cgen[id] * ROW_H };
+      const p = state.persons[id];
+      pos[id] = { cx: centerOf(id) + compDx + p.dx, y: cgen[id] * ROW_H + p.dy };
     });
     xCursor += (maxX - minX) + COMP_GAP;
   }
 
-  // union geometry for drawing
+  // union geometry for drawing (cards may sit at uneven heights after dragging)
   const unionGeo = [];
   for (const u of us) {
     const geo = { u, partnerLine: null, mid: null, rail: null };
     if (u.partners.length === 2) {
       const a = pos[u.partners[0]], b = pos[u.partners[1]];
       const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
-      const cy = a.y + CARD_H / 2;
-      const x1 = Math.min(l.cx + CARD_W / 2, r.cx - CARD_W / 2);
-      const x2 = Math.max(l.cx + CARD_W / 2, r.cx - CARD_W / 2);
-      geo.partnerLine = { x1, x2, y: cy };
-      geo.mid = { x: (l.cx + r.cx) / 2, y: cy };
+      geo.partnerLine = {
+        x1: l.cx + CARD_W / 2, y1: l.y + CARD_H / 2,
+        x2: r.cx - CARD_W / 2, y2: r.y + CARD_H / 2,
+      };
+      geo.mid = { x: (l.cx + r.cx) / 2, y: (l.y + r.y) / 2 + CARD_H / 2 };
     } else if (u.partners.length === 1) {
       const p = pos[u.partners[0]];
       geo.mid = { x: p.cx, y: p.y + CARD_H };
     }
     if (u.children.length) {
-      const childY = pos[u.children[0]].y;
-      const railY = childY - (ROW_H - CARD_H) / 2;
-      const xs = u.children.map(c => pos[c].cx);
-      let lo = Math.min(...xs), hi = Math.max(...xs);
+      const kids = u.children.map(c => ({ x: pos[c].cx, yTop: pos[c].y }));
+      const topY = Math.min(...kids.map(k => k.yTop));
+      const railY = topY - (ROW_H - CARD_H) / 2;
+      let lo = Math.min(...kids.map(k => k.x)), hi = Math.max(...kids.map(k => k.x));
       if (geo.mid) { lo = Math.min(lo, geo.mid.x); hi = Math.max(hi, geo.mid.x); }
-      geo.rail = { y: railY, x1: lo, x2: hi, childY, xs };
+      geo.rail = { y: railY, x1: lo, x2: hi, kids };
     }
     unionGeo.push(geo);
   }
@@ -430,8 +459,8 @@ function drawScene(group, L, opts) {
     if (geo.partnerLine) {
       const c = isOwnUnion ? REL_COLORS.spouse : lineColor;
       el('line', {
-        x1: geo.partnerLine.x1, y1: geo.partnerLine.y,
-        x2: geo.partnerLine.x2, y2: geo.partnerLine.y,
+        x1: geo.partnerLine.x1, y1: geo.partnerLine.y1,
+        x2: geo.partnerLine.x2, y2: geo.partnerLine.y2,
         stroke: c, 'stroke-width': isOwnUnion ? 3 : lw,
       }, group);
     }
@@ -443,12 +472,12 @@ function drawScene(group, L, opts) {
         el('line', { x1: geo.mid.x, y1: geo.mid.y, x2: geo.mid.x, y2: geo.rail.y }, g);
       }
       el('line', { x1: geo.rail.x1, y1: geo.rail.y, x2: geo.rail.x2, y2: geo.rail.y }, g);
-      geo.rail.xs.forEach(x => {
-        el('line', { x1: x, y1: geo.rail.y, x2: x, y2: geo.rail.childY }, g);
+      geo.rail.kids.forEach(k => {
+        el('line', { x1: k.x, y1: geo.rail.y, x2: k.x, y2: k.yTop }, g);
       });
       // sibling dots on the rail — makes sibling groups scannable at a glance
-      geo.rail.xs.forEach(x => {
-        el('circle', { cx: x, cy: geo.rail.y, r: 3.2, fill: railColor, stroke: 'none' }, g);
+      geo.rail.kids.forEach(k => {
+        el('circle', { cx: k.x, cy: geo.rail.y, r: 3.2, fill: railColor, stroke: 'none' }, g);
       });
     }
     if (geo.partnerLine && geo.mid) {
@@ -513,6 +542,15 @@ function drawScene(group, L, opts) {
     if (opts.interactive) {
       g.addEventListener('click', e => { e.stopPropagation(); select(pid); });
       g.addEventListener('dblclick', e => { e.stopPropagation(); openModal('edit', pid); });
+      g.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        dragCard = {
+          pid, sx: e.clientX, sy: e.clientY,
+          dx0: p.dx, dy0: p.dy, moved: false,
+        };
+        canvas.setPointerCapture(e.pointerId);
+      });
     }
   }
 }
@@ -572,8 +610,8 @@ function render() {
   $('hint').textContent = persons().length === 0
     ? 'Add a person to begin'
     : selected
-      ? 'Use the ＋ buttons: parent above · spouse & sibling beside · child below — double-click to edit'
-      : 'Click a person to light up their relationships · double-click to edit · drag to pan, scroll to zoom';
+      ? 'Use the ＋ buttons: parent above · spouse & sibling beside · child below — drag a card to nudge it, double-click to edit'
+      : 'Click a person to light up their relationships · drag a card to nudge it · double-click to edit · scroll to zoom';
 }
 
 function select(pid) {
@@ -631,6 +669,7 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 let panning = null;
+let dragCard = null;   // dragging a person card to nudge its position
 canvas.addEventListener('pointerdown', e => {
   if (e.target.closest('.card') || e.target.closest('.qbtn')) return;
   panning = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false };
@@ -638,6 +677,22 @@ canvas.addEventListener('pointerdown', e => {
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', e => {
+  if (dragCard) {
+    const p = state.persons[dragCard.pid];
+    if (!p) { dragCard = null; return; }
+    const ddx = (e.clientX - dragCard.sx) / view.k;
+    const ddy = (e.clientY - dragCard.sy) / view.k;
+    if (!dragCard.moved && Math.hypot(ddx * view.k, ddy * view.k) > 4) {
+      dragCard.moved = true;
+      pushUndo();
+    }
+    if (dragCard.moved) {
+      p.dx = dragCard.dx0 + ddx;
+      p.dy = dragCard.dy0 + ddy;
+      render();
+    }
+    return;
+  }
   if (!panning) return;
   const dx = e.clientX - panning.sx, dy = e.clientY - panning.sy;
   if (Math.abs(dx) + Math.abs(dy) > 3) panning.moved = true;
@@ -646,6 +701,15 @@ canvas.addEventListener('pointermove', e => {
   applyView();
 });
 canvas.addEventListener('pointerup', e => {
+  if (dragCard) {
+    const p = state.persons[dragCard.pid];
+    if (dragCard.moved && p) {
+      p.dx = Math.round(p.dx);
+      p.dy = Math.round(p.dy);
+    }
+    dragCard = null;
+    return;
+  }
   if (panning && !panning.moved) { selected = null; render(); }
   panning = null;
   canvas.classList.remove('panning');
@@ -910,6 +974,8 @@ function toXml() {
     if (p.birth) attrs += ` birth="${escXml(p.birth)}"`;
     if (p.death) attrs += ` death="${escXml(p.death)}"`;
     if (p.note) attrs += ` note="${escXml(p.note)}"`;
+    if (p.dx) attrs += ` dx="${Math.round(p.dx)}"`;
+    if (p.dy) attrs += ` dy="${Math.round(p.dy)}"`;
     lines.push(`  <person${attrs}/>`);
   }
   for (const u of unions()) {
@@ -947,6 +1013,8 @@ function parseXml(text) {
       death: e.getAttribute('death') || '',
       note: e.getAttribute('note') || '',
       parentUnion: null,
+      dx: parseFloat(e.getAttribute('dx')) || 0,
+      dy: parseFloat(e.getAttribute('dy')) || 0,
     };
     bumpSeq(id);
   }
@@ -1068,6 +1136,15 @@ $('btnZoomOut').addEventListener('click', () => {
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, 0.8);
 });
 $('btnFit').addEventListener('click', () => autoFit(true));
+$('btnTidy').addEventListener('click', () => {
+  const nudged = persons().filter(p => p.dx || p.dy);
+  if (!nudged.length) return;
+  pushUndo();
+  nudged.forEach(p => { p.dx = 0; p.dy = 0; });
+  render();
+  autoFit(true);
+});
+$('noteClose').addEventListener('click', () => $('saveNote').classList.add('hidden'));
 $('btnPng').addEventListener('click', exportPng);
 $('btnPdf').addEventListener('click', exportPdf);
 
@@ -1100,4 +1177,4 @@ $('btnUndo').disabled = true;
 render();
 
 /* Exposed for automated testing only. */
-window.__ftb = { state: () => state, addRelative, loadExample, exportPng, exportPdf, computeLayout, select: pid => select(pid) };
+window.__ftb = { state: () => state, addRelative, loadExample, exportPng, exportPdf, computeLayout, select: pid => select(pid), view: () => view };

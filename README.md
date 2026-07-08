@@ -45,7 +45,8 @@ Type a name (Enter saves), and the tree re-lays itself out automatically — cou
 
 ## Features
 
-- Automatic layered layout: generations in rows, parents centered over children, no overlaps
+- Automatic layered layout: generations in rows, parents centered exactly over their children (rows are solved with weighted isotonic regression so alignment never drifts), no overlaps
+- Drag any card to nudge it — connectors follow, positions are saved in the XML, and ✨ Tidy snaps everyone back to the automatic layout
 - Multiple spouses, single parents, and sibling groups with unknown parents all supported
 - Edit anyone via double-click (name, birth/death years, gender, note); delete with cleanup
 - Pan (drag), zoom (scroll or buttons), fit-to-screen

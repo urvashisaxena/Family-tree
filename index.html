@@ -24,6 +24,7 @@
     <button id="btnZoomOut" title="Zoom out">−</button>
     <button id="btnZoomIn" title="Zoom in">＋</button>
     <button id="btnFit" title="Fit tree to screen">Fit</button>
+    <button id="btnTidy" title="Snap everyone back to the automatic layout">✨ Tidy</button>
     <span class="sep"></span>
     <button id="btnPng" class="primary" title="Download as PNG image">⬇ PNG</button>
     <button id="btnPdf" class="primary" title="Download as PDF">⬇ PDF</button>
@@ -42,11 +43,17 @@
     <div class="emptyCard">
       <div class="emptyArt">🌳</div>
       <h2>Grow your family tree</h2>
-      <p>Add one person, then build outward with the ＋ buttons —<br>parents above, spouse beside, siblings alongside, children below.</p>
+      <p>Add one person, then build outward with the ＋ buttons —<br>parents above, spouse beside, siblings alongside, children below.<br>
+      <small>Done for today? Save as XML and open the same file next time to continue.</small></p>
       <button id="btnFirst" class="primary big">＋ Add the first person</button>
       <button id="btnExample2" class="ghost">…or start from an example</button>
       <button id="btnOpen2" class="ghost">…or open a saved .xml tree</button>
     </div>
+  </div>
+
+  <div id="saveNote">
+    <span>💡 Your tree lives only in this tab — nothing is stored online. Save it with <b>💾 XML</b> before you leave, and next time just <b>📂 Open</b> the same file to keep editing.</span>
+    <button id="noteClose" aria-label="Dismiss note" title="Dismiss">✕</button>
   </div>
 
   <div id="legend" class="hidden" aria-hidden="true">
